@@ -27,72 +27,145 @@ const initializeDbAndServer = async () => {
 
 initializeDbAndServer();
 
-// Getting all the details from the table
-app.get('/', async (request, response) => {
-  const getAllDetailsQuery = `
+app.post('/register', async (request, response) => {
+  const {username, name, password, gender, location} = request.body
+  const hassedPassword = await bcrypt.hash(password, 10)
+  const userQuery = `
+    SELECT 
+      * 
+    FROM 
+      user
+    WHERE 
+      username = '${username}'`
+  const dbUser = await db.get(userQuery)
+  console.log(dbUser)
+  console.log(password.length)
+
+  if (dbUser === undefined) {
+    if (password.length >= 5) {
+      const addUser = `
+            INSERT INTO user(username,name,password,gender,location)
+            VALUES(
+                '${username}',
+                '${name}',
+                '${hassedPassword}',
+                '${gender}',
+                '${location}'
+                )`
+      await db.run(addUser)
+      response.send(`Successful registration of the registrant`)
+    } else {
+      response.send(`Password is too short`)
+    }
+  } else {
+    response.send(`User already exists`)
+  }
+})
+
+app.post('/login/', async (request, response) => {
+  const {username, password} = request.body
+  const userQuery = `
+  SELECT 
+    *
+  FROM 
+    user
+  WHERE 
+    username='${username}';`
+  const dbUser = await db.get(userQuery)
+  if (dbUser === undefined) {
+    response.status = 400
+    response.send(`Invalid user`)
+  } else {
+    const isPasswordMach = await bcrypt.compare(password, dbUser.password)
+    console.log(isPasswordMach)
+    if (isPasswordMach == true) {
+      const payLoad = {username: username}
+      const jwtToken = jwt.sign(payLoad, 'sai_token')
+      response.send({jwtToken})
+    } else if (isPasswordMach == false) {
+      response.status = 400
+      response.send(`Invalid password`)
+    }
+  }
+})
+
+
+// changing th password
+app.put('/change-password', async (requset, response) => {
+  const {username, oldPassword, newPassword} = requset.body
+  console.log(username)
+  const userQuery = `
+  SELECT 
+    *
+  FROM 
+    user
+  WHERE 
+    username = '${username}'`
+  const dbUser = await db.get(userQuery)
+  const isPasswordMatch = await bcrypt.compare(oldPassword, dbUser.password)
+  if (isPasswordMatch) {
+    if (newPassword.length >= 5) {
+      const hassedNewPassword=await bcrypt.hash(newPassword,10)
+      const updateUser = `
+      UPDATE 
+        user
+      SET(
+        password='${hassedNewPassword}';
+      )`
+      const user = await db.run(updateUser)
+      response.send('Password updated')
+    } else {
+      response.send(`Password is too short`)
+    }
+  } else {
+    response.send('Invalid current password')
+  }
+})
+
+
+//middleware function
+const accesstokenfunction = (request, response, next) => {
+  const authorHeader = request.headers['authorization']
+  let jwtToken
+  if (authorHeader !== undefined) {
+    jwtToken = authorHeader.split(' ')[1]
+  }
+  if (jwtToken === undefined) {
+    response.status = 401
+    response.send('Invalid JWT Token')
+  } else {
+    jwt.verify(jwtToken, 'sai_token', async (error, user) => {
+      if (error) {
+        response.status = 401
+        response.send('Invalid JWT Token')
+      } else {
+        next()
+      }
+    })
+  }
+}
+
+//getting all the user details 
+
+app.get('/all-users',accesstokenfunction,async(request,response)=>{
+  const query=`
     SELECT 
       *
-    FROM 
-      books_table
-  `;
-  try {
-    const details = await db.all(getAllDetailsQuery);
-    response.status(200).json({ details });
-  } catch (error) {
-    response.status(500).send({ error: error.message });
-  }
-});
+    FROM  
+      user
+  `
+  const result= await db.all(query)
+  response.status(200).send({result})
+})
 
-// Adding a Book/Poetry to the table
-app.post('/add', async (request, response) => {
-  const { name, image, summary } = request.body;
-  const insertQuery = `
-    INSERT INTO 
-      books_table (name, img, summary)
-    VALUES
-      ('${name}','${image}', '${summary}')
-  `;
-  try {
-    await db.run(insertQuery);
-    response.status(200).send('Added Successfully');
-  } catch (error) {
-    response.status(500).send({ error: error.message });
-  }
-});
-
-// Updating a specified book/poetry in the table using id
-app.put('/update/:id', async (request, response) => {
-  const { name, image, summary } = request.body;
-  const { id } = request.params;
-  const updateQuery = `
-    UPDATE 
-      books_table
-    SET 
-      name = '${name}', img ='${image}', summary = '${summary}'
-    WHERE 
-      id = ${id}
-  `;
-  try {
-    await db.run(updateQuery, [name, image, summary, id]);
-    response.status(200).send('Updated Successfully');
-  } catch (error) {
-    response.status(500).send({ error: error.message });
-  }
-});
-
-// Deleting a specified book/poetry in the table using id
-app.delete('/delete/:id', async (request, response) => {
-  const { id } = request.params;
-  const deleteQuery = `
-    DELETE FROM 
-      books_table
-    WHERE 
-      id = ${id}
-  `;
-  try {
-    await db.run(deleteQuery, id);
-    response.status(200).send('Deleted Successfully');
-  } catch (error) {
-    response.status(500).send({ error: error.message });
-  }
-});
+app.delete('/delete/:id',accesstokenfunction,async(request,response)=>{
+  const id=request.params
+  const query= `
+    DELETE FROM   
+      user
+    WHERE
+      id=${id}
+  `
+  await db.run(query)
+  response.send("User deleted successfully")
+})
